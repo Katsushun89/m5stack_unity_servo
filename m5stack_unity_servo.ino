@@ -1,12 +1,33 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
-#include <M5Stack.h>
+#include <M5StickC.h>
+#include <ESP32Servo.h>
 #include "config.h"
 
 WebSocketsClient webSocket;
 DynamicJsonDocument doc(1024);
 
+TaskHandle_t th[4];
+
+//Servo
+Servo servo1; // create four servo objects 
+int32_t servo1_pin = 26;
+const int32_t MIN_US = 500;
+const int32_t MAX_US = 2400;
+
+int16_t cur_servo_pos = 0;
+int16_t goal_servo_pos = 0;
+
+void setupServo(void)
+{
+  servo1.setPeriodHertz(50); // Standard 50hz servo
+  servo1.attach(servo1_pin, MIN_US, MAX_US);
+
+  cur_servo_pos = servo1.read();
+  Serial.print("cur_servo_pos:");
+  Serial.println(cur_servo_pos);
+}
 
 std::string parseReceivedJson(uint8_t *payload)
 {
@@ -34,6 +55,7 @@ void ctrlServo(uint8_t *payload)
   M5.Lcd.fillRect(0, 0, 240, 40, 0);
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.printf("%s\n", angle.c_str());
+  goal_servo_pos = atoi(angle.c_str());
 }
 
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
@@ -98,9 +120,15 @@ void setup()
   M5.begin();
 
   setupWiFi();
+  setupServo();
   M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setRotation(3);
   M5.Lcd.setTextColor(GREEN);
-  M5.Lcd.setTextSize(4);
+  M5.Lcd.setCursor(0, 0, 2);
+  M5.Lcd.setTextSize(3);
+
+  xTaskCreatePinnedToCore(servoControl, "servoControl", 4096, NULL, 1, &th[0], 0);
+
 }
 
 void loop() {
@@ -114,4 +142,22 @@ void loop() {
   webSocket.loop();
 
   M5.update();
+}
+
+
+void moveServo()
+{
+  if(goal_servo_pos == cur_servo_pos) return;
+
+  servo1.write(goal_servo_pos);
+  cur_servo_pos = goal_servo_pos;
+  delay(100);
+}
+
+void servoControl(void *pvParameters)
+{
+  while(1){
+    moveServo();
+    delay(1);
+  }
 }
